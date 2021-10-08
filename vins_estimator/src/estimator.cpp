@@ -109,17 +109,15 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
         angular_velocity_buf[frame_count].push_back(angular_velocity);
 
         int j = frame_count; //这里打印下，发现在初始化阶段frame_count从1->10,之后就是全是10
-                                                 //初始化时，当有新的关键帧后，即初始化中frame_count++后，下面的代码纯粹是imu的中值积分(用来初始化？)
-                                                 
-                                                 
-                                                 //初始化完成后，当有新的关键帧后，索引当然还是10，因为有边缘化嘛。当frame_count更新后，即对应j的关键帧也optimization过了，有了新的Bas
-                                                 //后端优化时在每次优化后再进行边缘化(optimization中),优化后边缘化后进行了赋值操作P[j] = P[j-1],slidewindow时进行了如下操作
-            //                                      //Headers[WINDOW_SIZE] = Headers[WINDOW_SIZE - 1];
-                                                    // Ps[WINDOW_SIZE] = Ps[WINDOW_SIZE - 1];
-                                                    // Vs[WINDOW_SIZE] = Vs[WINDOW_SIZE - 1];
-                                                    // Rs[WINDOW_SIZE] = Rs[WINDOW_SIZE - 1];
-                                                    // Bas[WINDOW_SIZE] = Bas[WINDOW_SIZE - 1];
-                                                    // Bgs[WINDOW_SIZE] = Bgs[WINDOW_SIZE - 1];
+        //初始化时，当有新的关键帧后，即初始化中frame_count++后，下面的代码纯粹是imu的中值积分(用来初始化？)
+        //初始化完成后，当有新的关键帧后，索引当然还是10，因为有边缘化嘛。当frame_count更新后，即对应j的关键帧也optimization过了，有了新的Bas
+        //后端优化时在每次优化后再进行边缘化(optimization中),优化后边缘化后进行了赋值操作P[j] = P[j-1],slidewindow时进行了如下操作
+        //Headers[WINDOW_SIZE] = Headers[WINDOW_SIZE - 1];
+        // Ps[WINDOW_SIZE] = Ps[WINDOW_SIZE - 1];
+        // Vs[WINDOW_SIZE] = Vs[WINDOW_SIZE - 1];
+        // Rs[WINDOW_SIZE] = Rs[WINDOW_SIZE - 1];
+        // Bas[WINDOW_SIZE] = Bas[WINDOW_SIZE - 1];
+        // Bgs[WINDOW_SIZE] = Bgs[WINDOW_SIZE - 1];
 
         Vector3d un_acc_0 = Rs[j] * (acc_0 - Bas[j]) - g;
 
@@ -141,7 +139,7 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
  * @Description addFeatureCheckParallax()添加特征点到feature中，计算点跟踪的次数和视差，判断是否是关键帧               
  *              判断并进行外参标定
  *              进行视觉惯性联合初始化或基于滑动窗口非线性优化的紧耦合VIO
- * @param[in]   image 某帧所有特征点的[camera_id,[x,y,z,u,v,vx,vy]]s构成的map,索引为feature_id
+ * @param[in]   image 某帧所有特征点的[camera_id,[    x,y,z,u,v,vx,vy      ]]s构成的map,索引为feature_id     注意这里的7维
  * @param[in]   header 某帧图像的头信息
  * @return  void
 */
@@ -310,35 +308,36 @@ bool Estimator::initialStructure()
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
     vector<SFMFeature> sfm_f;
-    for (auto &it_per_id : f_manager.feature)
+    for (auto &it_per_id : f_manager.feature)//对于滑窗中出现的 所有特征点
     {
-        int imu_j = it_per_id.start_frame - 1;
+        int imu_j = it_per_id.start_frame - 1;//从start_frame开始帧编号
         SFMFeature tmp_feature;
-        tmp_feature.state = false;
+        tmp_feature.state = false;//状态（是否被三角化）
         tmp_feature.id = it_per_id.feature_id;
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
-            imu_j++;
+            imu_j++;//帧编号+1
             Vector3d pts_j = it_per_frame.point;
-            tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));
+            tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));//把当前特征在当前帧的坐标和当前帧的编号配上对
         }
-        sfm_f.push_back(tmp_feature);
+        sfm_f.push_back(tmp_feature);//sfm_f里面存放着是不同特征
     } 
 
     Matrix3d relative_R;
     Vector3d relative_T;
     int l;
 
-    //保证具有足够的视差,由F矩阵恢复Rt
+    //1： 保证具有足够的视差,由F矩阵恢复Rt
     //第l帧是从第一帧开始到滑动窗口中第一个满足与当前帧的平均视差足够大的帧，会作为参考帧到下面的全局sfm使用
     //此处的relative_R，relative_T为当前帧到参考帧（第l帧）的坐标系变换Rt
+    ////这里的第L帧是从第一帧开始到滑动窗口中第一个满足与当前帧的平均视差足够大的帧l，会作为 参考帧 到下面的全局sfm使用，得到的Rt为当前帧到第l帧的坐标系变换Rt
     if (!relativePose(relative_R, relative_T, l))
     {
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
 
-    //对窗口中每个图像帧求解sfm问题
+    //对每个图像帧求解sfm问题
     //得到所有图像帧相对于参考帧的姿态四元数Q、平移向量T和特征点坐标sfm_tracked_points。
     GlobalSFM sfm;
     if(!sfm.construct(frame_count + 1, Q, T, l,
@@ -351,7 +350,8 @@ bool Estimator::initialStructure()
         return false;
     }
 
-    //对于所有的图像帧，包括不在滑动窗口中的，提供初始的RT估计，然后solvePnP进行优化,得到每一帧的姿态
+    //对于所有的图像帧，提供初始的RT估计(上面的求解时使用的上一帧的估计值，又用自身的值，又ba优化,都是滑窗windows内的;而且上面求解的都是在L帧数据坐标系下
+    //下面是除了windows窗口内数据外的数据
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
@@ -371,23 +371,23 @@ bool Estimator::initialStructure()
             i++;
         }
 
-        //Q和T是图像帧的位姿，而不是求解PNP时所用的坐标系变换矩阵
-        Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
-        Vector3d P_inital = - R_inital * T[i];
+        //Q和T是图像帧的位姿，这里变换一下，换成求解PnP时所用的坐标系变换矩阵(将世界坐标系下的点变换到相机坐标系所需要的旋转和平移，实际上也是相机在世界坐标系下的位姿，即R*Pw + T = Pc)
+        Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();//换成求解PnP时所用的坐标系变换矩阵
+        Vector3d P_inital = - R_inital * T[i];//摄像机坐标系的原点在世界坐标系的坐标
         cv::eigen2cv(R_inital, tmp_r);
         //罗德里格斯公式将旋转矩阵转换成旋转向量
-        cv::Rodrigues(tmp_r, rvec);
-        cv::eigen2cv(P_inital, t);
+        cv::Rodrigues(tmp_r, rvec);//给pnp提供初始估计值R    滑窗内的初始位姿在SFM中已经BA优化得到,在所有帧数据中，剩余的没有求出的R、T初值应该为单位阵放入三角化初始值
+        cv::eigen2cv(P_inital, t);//给pnp提供初始估计值T
 
         frame_it->second.is_key_frame = false;
         vector<cv::Point3f> pts_3_vector;
         vector<cv::Point2f> pts_2_vector;
-        for (auto &id_pts : frame_it->second.points)
+        for (auto &id_pts : frame_it->second.points)//该帧对应的所有图像二维特征点      通过sfm_tracked_points.find找到像素对应3d放入pts_3_vector;以及该帧中对应的2维u v放入pts_2_vector
         {
             int feature_id = id_pts.first;
             for (auto &i_p : id_pts.second)
             {
-                it = sfm_tracked_points.find(feature_id);
+                it = sfm_tracked_points.find(feature_id);//sfm_tracked_points是SFM里面BA优化后存储的
                 if(it != sfm_tracked_points.end())
                 {
                     Vector3d world_pts = it->second;
@@ -419,7 +419,7 @@ bool Estimator::initialStructure()
          *   int     flags = SOLVEPNP_ITERATIVE 采用LM优化
          *)   
          */
-        if (! cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1))
+        if (! cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1))//任意一帧pnp解算失败则初始化失败     注意这里的rvec t为坐标系变换矩阵
         {
             ROS_DEBUG("solve pnp fail!");
             return false;
@@ -428,11 +428,11 @@ bool Estimator::initialStructure()
         MatrixXd R_pnp,tmp_R_pnp;
         cv::cv2eigen(r, tmp_R_pnp);
         //这里也同样需要将坐标变换矩阵转变成图像帧位姿，并转换为IMU坐标系的位姿
-        R_pnp = tmp_R_pnp.transpose();
+        R_pnp = tmp_R_pnp.transpose();//将坐标变换矩阵转变成图像帧位姿
         MatrixXd T_pnp;
         cv::cv2eigen(t, T_pnp);
         T_pnp = R_pnp * (-T_pnp);
-        frame_it->second.R = R_pnp * RIC[0].transpose();
+        frame_it->second.R = R_pnp * RIC[0].transpose();//转换为IMU坐标系的位姿
         frame_it->second.T = T_pnp;
     }
 
@@ -527,7 +527,7 @@ bool Estimator::visualInitialAlign()
     //通过将重力旋转到z轴上，得到世界坐标系与摄像机坐标系c0之间的旋转矩阵rot_diff
     Matrix3d R0 = Utility::g2R(g);
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
-    R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
+    R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;//另初始的航向为0
     g = R0 * g;
 
     //Matrix3d rot_diff = R0 * Rs[0].transpose();
@@ -580,6 +580,7 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 
             //判断是否满足初始化条件：视差>30和内点数满足要求
             //同时返回窗口最后一帧（当前帧）到第l帧（参考帧）的Rt
+            //这个relative_R和relative_T是把最新一帧旋转到第l帧的旋转平移
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;

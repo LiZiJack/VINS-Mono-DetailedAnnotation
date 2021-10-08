@@ -62,9 +62,10 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     //cout << svd.singularValues().transpose() << endl;
     //cout << ric << endl;
     Vector3d ric_cov;
-    ric_cov = svd.singularValues().tail<3>();
+    ric_cov = svd.singularValues().tail<3>();//取出尾部最小的三个奇异值
 
     //至少迭代计算了WINDOW_SIZE次，且R的奇异值大于0.25才认为标定成功
+    //最小的奇异值接近0，要和第二小有足够差距
     if (frame_count >= WINDOW_SIZE && ric_cov(1) > 0.25)
     {
         calib_ric_result = ric;

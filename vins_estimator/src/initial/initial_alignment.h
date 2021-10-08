@@ -23,7 +23,7 @@ class ImageFrame
         {
             points = _points;
         };
-        map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>> > > points;
+        map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>> > > points; //某帧所有特征点的[camera_id,[    x,y,z,u,v,vx,vy      ]]s构成的map
         double t;
         Matrix3d R;
         Vector3d T;

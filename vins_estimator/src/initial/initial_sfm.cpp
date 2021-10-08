@@ -32,12 +32,12 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 		Vector2d point2d;
 		for (int k = 0; k < (int)sfm_f[j].observation.size(); k++)
 		{
-			if (sfm_f[j].observation[k].first == i)
+			if (sfm_f[j].observation[k].first == i)//进来条件： 第i帧观察到的所有   已经三角化的特征点   对应的图像2d像素坐标及其对应的3d三角化点坐标进行存储
 			{
 				Vector2d img_pts = sfm_f[j].observation[k].second;
 				cv::Point2f pts_2(img_pts(0), img_pts(1));
 				pts_2_vector.push_back(pts_2);
-				cv::Point3f pts_3(sfm_f[j].position[0], sfm_f[j].position[1], sfm_f[j].position[2]);
+				cv::Point3f pts_3(sfm_f[j].position[0], sfm_f[j].position[1], sfm_fFeaturePerFramej].position[2]);
 				pts_3_vector.push_back(pts_3);
 				break;
 			}
@@ -49,7 +49,7 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 		if (int(pts_2_vector.size()) < 10)
 			return false;
 	}
-	cv::Mat r, rvec, t, D, tmp_r;
+	cv::Mat r, rvec, t, D, tmp_r;FeaturePerFrame
 	cv::eigen2cv(R_initial, tmp_r);
 	cv::Rodrigues(tmp_r, rvec);
 	cv::eigen2cv(P_initial, t);
@@ -146,19 +146,19 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	Quaterniond c_Quat[frame_num];
 	double c_rotation[frame_num][4];
 	double c_translation[frame_num][3];
-	Eigen::Matrix<double, 3, 4> Pose[frame_num];
-	//这里的pose表示的是第l帧到每一帧的变换矩阵
-
+	Eigen::Matrix<double, 3, 4> Pose[frame_num];//注意s这里的pose表示的是第l帧到每一帧的变换矩阵注意顺序：Ｌ帧到　其他帧(ceres优化中用的r 、ｔ也是这个顺序)
+	//注意与construct之前求R、ｔ时坐标系之间的变换顺序计算方式类似；relativePose中从L到当前帧的R、ｔ最后转为当前帧到L；这里又转回来是因为pnp过程用的还是L到当前帧的变换顺序
+	
 	c_Quat[l] = q[l].inverse();
 	c_Rotation[l] = c_Quat[l].toRotationMatrix();
 	c_Translation[l] = -1 * (c_Rotation[l] * T[l]);
-	Pose[l].block<3, 3>(0, 0) = c_Rotation[l];
+	Pose[l].block<3, 3>(0, 0) = c_Rotation[l];//第L帧　到第L帧　　的旋转、平移
 	Pose[l].block<3, 1>(0, 3) = c_Translation[l];
 
 	c_Quat[frame_num - 1] = q[frame_num - 1].inverse();
 	c_Rotation[frame_num - 1] = c_Quat[frame_num - 1].toRotationMatrix();
-	c_Translation[frame_num - 1] = -1 * (c_Rotation[frame_num - 1] * T[frame_num - 1]);
-	Pose[frame_num - 1].block<3, 3>(0, 0) = c_Rotation[frame_num - 1];
+	c_Translation[frame_num - 1] = -1 * (c_Rotation[frame_num - 1] * T[frame_num - 1]);//这里的c_Translation[frame_num - 1] 理论上是归一化的平移，即为001,在relativePose中求解过
+	Pose[frame_num - 1].block<3, 3>(0, 0) = c_Rotation[frame_num - 1];//当前帧　到第L帧　　的旋转、平移
 	Pose[frame_num - 1].block<3, 1>(0, 3) = c_Translation[frame_num - 1];
 
 
@@ -171,7 +171,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		{
 			Matrix3d R_initial = c_Rotation[i - 1];
 			Vector3d P_initial = c_Translation[i - 1];
-			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))
+			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))//3:求相对位姿 -----  输入估计的位姿初值initial，计算l+1帧到frame_num - 1帧与l帧的pnp，求解真实相对位姿重置R_initial, P_initial;会用到sfm中已经
 				return false;
 			c_Rotation[i] = R_initial;
 			c_Translation[i] = P_initial;
@@ -179,9 +179,8 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 			Pose[i].block<3, 3>(0, 0) = c_Rotation[i];
 			Pose[i].block<3, 1>(0, 3) = c_Translation[i];
 		}
-
-		
-		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);
+		//有了相对位姿R、T后再进行三角化
+		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);//2: 三角化求深度 -------- l帧和当前帧已经经过relativepose计算出来了RT，当然存在尺度问题，这里三角化出该尺度下的3d路标点(求深度)并存储到sfm_f
 	}
 
 	//3、对第l帧与第l+1到frame_num -2的每一帧再进行三角化
@@ -206,7 +205,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		triangulateTwoFrames(i, Pose[i], l, Pose[l], sfm_f);
 	}
 
-	//5、三角化其他未恢复的特征点。
+	//5、三角化其他未恢复的特征点。(这里需要测试，到底有没有情况  会有没有恢复的特征点?目前我认为不会出现此情况)
 	//至此得到了滑动窗口中所有图像帧的位姿以及特征点的3d坐标
 	for (int j = 0; j < feature_num; j++)
 	{
@@ -247,7 +246,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	ceres::Problem problem;
 	ceres::LocalParameterization* local_parameterization = new ceres::QuaternionParameterization();
 	//cout << " begin full BA " << endl;
-	for (int i = 0; i < frame_num; i++)
+	for (int i = 0; i < frame_num; i++)//BA优化的变量的传入
 	{
 		//double array for ceres
 		c_translation[i][0] = c_Translation[i].x();
@@ -273,7 +272,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	{
 		if (sfm_f[i].state != true)
 			continue;
-		for (int j = 0; j < int(sfm_f[i].observation.size()); j++)
+		for (int j = 0; j < int(sfm_f[i].observation.size()); j++)//BA优化的代价函数的构建
 		{
 			int l = sfm_f[i].observation[j].first;
 			ceres::CostFunction* cost_function = ReprojectionError3D::Create(
@@ -281,7 +280,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 												sfm_f[i].observation[j].second.y());
 
     		problem.AddResidualBlock(cost_function, NULL, c_rotation[l], c_translation[l], 
-    								sfm_f[i].position);	 
+    								sfm_f[i].position);	 //这边参数对应于operator()函数参数
 		}
 
 	}
@@ -320,7 +319,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	for (int i = 0; i < (int)sfm_f.size(); i++)
 	{
 		if(sfm_f[i].state)
-			sfm_tracked_points[sfm_f[i].id] = Vector3d(sfm_f[i].position[0], sfm_f[i].position[1], sfm_f[i].position[2]);
+			sfm_tracked_points[sfm_f[i].id] = Vector3d(sfm_f[i].position[0], sfm_f[i].position[1], sfm_f[i].position[2]);//这里sfm_tracked_points后面还会用到
 	}
 	return true;
 

@@ -34,21 +34,22 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         //      = 2 * (r^bk_bk+1)^-1 * q_ij
         tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
         //tmp_A * delta_bg = tmp_b
-        A += tmp_A.transpose() * tmp_A;
+        A += tmp_A.transpose() * tmp_A;//矩阵求和
         b += tmp_A.transpose() * tmp_b;
 
     }
     //LDLT方法
-    delta_bg = A.ldlt().solve(b);
+    delta_bg = A.ldlt().solve(b);//求出偏执增量，
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
     for (int i = 0; i <= WINDOW_SIZE; i++)
-        Bgs[i] += delta_bg;
+        Bgs[i] += delta_bg;//1  更新滑窗中各imu对应的bgs    //这里对滑窗内全部的Bgs赋值，然后下一步重新预积分（将新的偏执传入），重新预积分的过程中相邻两个关键帧之间偏执不变且备份到linearized_ba变量里面，
+                                              //在滑窗优化后Bgs有所变动，但是linearized还是优化前的备份数值，则在integratation中evaluate()里面可以通过Bgs-linearized_bg来计算Bias的误差量，进而进行修正
 
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
     {
         frame_j = next(frame_i);
-        frame_j->second.pre_integration->repropagate(Vector3d::Zero(), Bgs[0]);
+        frame_j->second.pre_integration->repropagate(Vector3d::Zero(), Bgs[0]);//预积分的值与1对应  这里注意重新预积分只是传入bgs[0]，因为bgs是随机游走，则整个滑窗重初始化时bgs初值一样
     }
 }
 
@@ -77,40 +78,30 @@ MatrixXd TangentBasis(Vector3d &g0)
  * @param[out]  x 待优化变量，窗口中每帧的速度V[0:n]、二自由度重力参数w[w1,w2]^T、尺度s
  * @return      void
 */
-void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
-{
-    //g0 = (g^-)*||g||
-    Vector3d g0 = g.normalized() * G.norm();
-    Vector3d lx, ly;
-    //VectorXd x;
+void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x) {
+    Vector3d g0 = g.normalized() * G.norm();    //g0 = (g^-)*||g||//乘以G的模值那么得到gc0方向上的模值
+    Vector3d lx, ly;//论文中w1,w2
     int all_frame_count = all_image_frame.size();
-    int n_state = all_frame_count * 3 + 2 + 1;
-
+    int n_state = all_frame_count * 3 + 2 + 1;//注意与LinearAlignment中求解用的维度-1
     MatrixXd A{n_state, n_state};
     A.setZero();
     VectorXd b{n_state};
     b.setZero();
-
     map<double, ImageFrame>::iterator frame_i;
     map<double, ImageFrame>::iterator frame_j;
-
     for(int k = 0; k < 4; k++)//迭代4次
     {
-        //lxly = b = [b1,b2]
-        MatrixXd lxly(3, 2);
+        MatrixXd lxly(3, 2);//lxly = b = [b1,b2]
         lxly = TangentBasis(g0);
         int i = 0;
         for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
         {
             frame_j = next(frame_i);
-
             MatrixXd tmp_A(6, 9);
             tmp_A.setZero();
             VectorXd tmp_b(6);
             tmp_b.setZero();
-
             double dt = frame_j->second.pre_integration->sum_dt;
-
             // tmp_A(6,9) = [-I*dt           0             (R^bk_c0)*dt*dt*b/2   (R^bk_c0)*((p^c0_ck+1)-(p^c0_ck))  ] 
             //              [ -I    (R^bk_c0)*(R^c0_bk+1)      (R^bk_c0)*dt*b                  0                    ]
             // tmp_b(6,1) = [ (a^bk_bk+1)+(R^bk_c0)*(R^c0_bk+1)*p^b_c-p^b_c - (R^bk_c0)*dt*dt*||g||*(g^-)/2 , (b^bk_bk+1)-(R^bk_c0)dt*||g||*(g^-)]^T
@@ -124,13 +115,10 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
             tmp_A.block<3, 3>(3, 3) = frame_i->second.R.transpose() * frame_j->second.R;
             tmp_A.block<3, 2>(3, 6) = frame_i->second.R.transpose() * dt * Matrix3d::Identity() * lxly;
             tmp_b.block<3, 1>(3, 0) = frame_j->second.pre_integration->delta_v - frame_i->second.R.transpose() * dt * Matrix3d::Identity() * g0;
-
-
             Matrix<double, 6, 6> cov_inv = Matrix<double, 6, 6>::Zero();
             //cov.block<6, 6>(0, 0) = IMU_cov[i + 1];
             //MatrixXd cov_inv = cov.inverse();
             cov_inv.setIdentity();
-
             MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
             VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
 
@@ -146,10 +134,11 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
             A = A * 1000.0;
             b = b * 1000.0;
             x = A.ldlt().solve(b);
-            //dg = [w1,w2]^T
-            VectorXd dg = x.segment<2>(n_state - 3);
+            VectorXd dg = x.segment<2>(n_state - 3);//dg = [w1,w2]^T
+            //每次normalized（）之后 (g0 + lxly * dg).normalized()  即为每次迭代后得到b1 b2后，只更新重力方向，不更新模值
+            // 模值仍然是G.norm()；但是方向更新为g0 + lxly * dg
             g0 = (g0 + lxly * dg).normalized() * G.norm();
-            //double s = x(n_state - 1);
+            //double s = x(n_state - 1); 
     }   
     g = g0;
 }
@@ -164,12 +153,10 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
  * @param[out]  x 待优化变量，窗口中每帧的速度V[0:n]、重力g、尺度s
  * @return      void
 */
-bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
-{
+bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x) {
     int all_frame_count = all_image_frame.size();
     //优化量x的总维度
-    int n_state = all_frame_count * 3 + 3 + 1;
-
+    int n_state = all_frame_count * 3 + 3 + 1;//需要优化的状态量的个数
     MatrixXd A{n_state, n_state};
     A.setZero();
     VectorXd b{n_state};
@@ -178,20 +165,13 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
     map<double, ImageFrame>::iterator frame_i;
     map<double, ImageFrame>::iterator frame_j;
     int i = 0;
-    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
-    {
+    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++) {
         frame_j = next(frame_i);
-
         MatrixXd tmp_A(6, 10);
         tmp_A.setZero();
         VectorXd tmp_b(6);
         tmp_b.setZero();
-
         double dt = frame_j->second.pre_integration->sum_dt;
-
-        // tmp_A(6,10) = H^bk_bk+1 = [-I*dt           0             (R^bk_c0)*dt*dt/2   (R^bk_c0)*((p^c0_ck+1)-(p^c0_ck))  ] 
-        //                           [ -I    (R^bk_c0)*(R^c0_bk+1)      (R^bk_c0)*dt                  0                    ]
-        // tmp_b(6,1 ) = z^bk_bk+1 = [ (a^bk_bk+1)+(R^bk_c0)*(R^c0_bk+1)*p^b_c-p^b_c , (b^bk_bk+1)]^T
         // tmp_A * x = tmp_b 求解最小二乘问题
         tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
         tmp_A.block<3, 3>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity();
@@ -203,46 +183,38 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         tmp_A.block<3, 3>(3, 6) = frame_i->second.R.transpose() * dt * Matrix3d::Identity();
         tmp_b.block<3, 1>(3, 0) = frame_j->second.pre_integration->delta_v;
         //cout << "delta_v   " << frame_j->second.pre_integration->delta_v.transpose() << endl;
-
         Matrix<double, 6, 6> cov_inv = Matrix<double, 6, 6>::Zero();
         //cov.block<6, 6>(0, 0) = IMU_cov[i + 1];
         //MatrixXd cov_inv = cov.inverse();
         cov_inv.setIdentity();
 
-        MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
+        MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;//这里有信息矩阵操作，TODO明白其意义?但这里为单位阵暂时不研究
         VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
 
-        A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();
-        b.segment<6>(i * 3) += r_b.head<6>();
-
-        A.bottomRightCorner<4, 4>() += r_A.bottomRightCorner<4, 4>();
+        A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();//因为r_A的后3行列为0，所以这么加，又因为前面all_frame_count * 3这是速度的维度
+        b.segment<6>(i * 3) += r_b.head<6>();//b的行数要等于A的，所以这里k=0到n的速度求解时，A和b的矩阵块都要填上
+        A.bottomRightCorner<4, 4>() += r_A.bottomRightCorner<4, 4>();//求解s的矩阵块
         b.tail<4>() += r_b.tail<4>();
-
-        A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();
+        A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();//求解g的矩阵块
         A.block<4, 6>(n_state - 4, i * 3) += r_A.bottomLeftCorner<4, 6>();
     }
-    A = A * 1000.0;
+    A = A * 1000.0;// TODO 但是这些乘1000，除100的操作，最后算起来为啥不等于1呢？
     b = b * 1000.0;
-    x = A.ldlt().solve(b);
+    x = A.ldlt().solve(b);//LDLT求解
 
-    double s = x(n_state - 1) / 100.0;
+    double s = x(n_state - 1) / 100.0;//x(n_state - 1)  指的是x向量的最后一个值的意思
     ROS_DEBUG("estimated scale: %f", s);
-
     g = x.segment<3>(n_state - 4);
     ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
     
-    if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
-    {
+    if(fabs(g.norm() - G.norm()) > 1.0 || s < 0) {
         return false;
     }
-
     //重力细化
     RefineGravity(all_image_frame, g, x);
-    
     s = (x.tail<1>())(0) / 100.0;
     (x.tail<1>())(0) = s;
     ROS_DEBUG_STREAM(" refine     " << g.norm() << " " << g.transpose());
-    
     if(s < 0.0 )
         return false;   
     else

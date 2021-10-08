@@ -237,12 +237,13 @@ bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &co
          *      InputOutputArray    mask = noArray()  在findFundamentalMat()中没有被舍弃的点
          *  )  
         */
+        //注意：recoverPose求解出来的T都是归一化的值，即0,0,1;图像p1与图像p2求解出来的T是001；图像p2与图像p3求解出来的T也是001；但是这两个归一化的尺度可能不一样；对于R，不存在尺度一说，所以没有尺度问题，是真实的
         int inlier_cnt = cv::recoverPose(E, ll, rr, cameraMatrix, rot, trans, mask);
         //cout << "inlier_cnt " << inlier_cnt << endl;
 
-        //rr=R*ll+t     ll=(R^T)*rr-(R^T)*t
-        Eigen::Matrix3d R;
-        Eigen::Vector3d T;
+        //注意，如果是第一帧坐标系到第二帧坐标系变换关系为：rr=R*ll+t    ；那么第二帧坐标系到第一帧坐标系关系则为  ll=(R^T)*rr-(R^T)*t  
+        Eigen::Matrix3d R;//这里的R是  rr系下；也可以说是ll系下；因为图像坐标系轴之间关系不变
+        Eigen::Vector3d T;//这里的T是  rr系下的
         for (int i = 0; i < 3; i++)
         {   
             T(i) = trans.at<double>(i, 0);
@@ -252,7 +253,7 @@ bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &co
 
         //得到窗口最后一帧（当前帧）到第l帧（参考帧）的坐标系变换Rt
         Rotation = R.transpose();
-        Translation = -R.transpose() * T;
+        Translation = -R.transpose() * T;//将rr系下的T变换为，到第1帧坐标系即到ll系下的T
         if(inlier_cnt > 12)
             return true;
         else

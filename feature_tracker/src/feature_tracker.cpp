@@ -264,7 +264,7 @@ void FeatureTracker::rejectWithF()
             //根据不同的相机模型将二维坐标转换到三维坐标
             m_camera->liftProjective(Eigen::Vector2d(cur_pts[i].x, cur_pts[i].y), tmp_p);
             //转换为归一化像素坐标
-            tmp_p.x() = FOCAL_LENGTH * tmp_p.x() / tmp_p.z() + COL / 2.0;
+            tmp_p.x() = FOCAL_LENGTH * tmp_p.x() / tmp_p.z() + COL / 2.0;//FOCAL_LENGTH为焦距
             tmp_p.y() = FOCAL_LENGTH * tmp_p.y() / tmp_p.z() + ROW / 2.0;
             un_cur_pts[i] = cv::Point2f(tmp_p.x(), tmp_p.y());
 
@@ -361,7 +361,7 @@ void FeatureTracker::undistortedPoints()
         Eigen::Vector3d b;
 
         //根据不同的相机模型将二维坐标转换到三维坐标
-        m_camera->liftProjective(a, b);
+        m_camera->liftProjective(a, b);//从像素坐标转换为   图像无畸变归一化坐标(3d)  知乎中公式4的一个求逆过程
 
         //再延伸到深度归一化平面上
         cur_un_pts.push_back(cv::Point2f(b.x() / b.z(), b.y() / b.z()));

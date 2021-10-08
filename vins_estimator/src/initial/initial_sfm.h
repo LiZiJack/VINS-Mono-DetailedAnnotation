@@ -11,16 +11,24 @@
 using namespace Eigen;
 using namespace std;
 
+/*
+网上：在这里，为什么要多此一举构造一个sfm_f而不是直接使用f_manager呢？ 我的理解，
+是因为f_manager的信息量大于SfM所需的信息量(f_manager包含了大量的像素信息)，
+而且不同的数据结构是为了不同的业务服务的，所以在这里作者专门为SfM设计了一个全新的数据结构sfm_f，专业化服务。
 
+*/
 struct SFMFeature
 {
     bool state;//特征点的状态（是否被三角化）
-    int id;//
+    int id;//特征点id
     vector<pair<int,Vector2d>> observation;//所有观测到该特征点的图像帧ID和图像坐标
-    double position[3];//3d坐标
+    double position[3];//3d坐标   在帧L下的空间坐标
     double depth;//深度
 };
 
+//  camera_R, //L帧图像到i帧图像R
+//  camera_T, //L帧图像到i帧图像平移
+//  point, //3d投标点空间坐标值  注意point在L帧坐标系下
 struct ReprojectionError3D
 {
 	ReprojectionError3D(double observed_u, double observed_v)
@@ -48,7 +56,7 @@ struct ReprojectionError3D
 	          	new ReprojectionError3D(observed_x,observed_y)));
 	}
 
-	double observed_u;
+	double observed_u;//前端跟踪到的图像归一化平面坐标   前端跟踪时用liftProjective转的
 	double observed_v;
 };
 

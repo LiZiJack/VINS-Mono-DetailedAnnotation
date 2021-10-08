@@ -9,7 +9,11 @@ using namespace std;
 using namespace Eigen;
 
 #include <ros/console.h>
+/*
+数据结构: MotionEstimator m_estimator 它定义在initial/solve_5pts.h中，
+这个类没有数据成员，只有函数功能。所以说，TODO 把这个h文件干掉，融到estimator.cpp里面去！ 
 
+*/
 class MotionEstimator
 {
   public:

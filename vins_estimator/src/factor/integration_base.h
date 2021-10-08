@@ -172,7 +172,7 @@ class IntegrationBase
         delta_p = result_delta_p;
         delta_q = result_delta_q;
         delta_v = result_delta_v;
-        linearized_ba = result_linearized_ba;
+        linearized_ba = result_linearized_ba;//因为两关键帧之间预积分过程linearized_ba是不变的，则这里传进来相当于是bias初值的意义
         linearized_bg = result_linearized_bg;
         delta_q.normalize();
         sum_dt += dt;
@@ -201,8 +201,9 @@ class IntegrationBase
 
         Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(O_V, O_BA);
         Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(O_V, O_BG);
-
-        Eigen::Vector3d dba = Bai - linearized_ba;//与上一帧的变化量，第一个滑窗时，linearized_ba对应于滑窗中每一帧均为0,但最终也会优化出bai(符合初值为0的说法)。第一个关键帧 对应的linearized_ba是0，而且Bai也是0;
+        //因为初始化后滑窗size是满的，之后每新来一帧k+1数据，复制了优化后的k时刻优化后的状态，linearized_ba是优化前状态(这是size满后初始化后的操作)（如果新来一帧然后后端会再优化一次那么当前帧bias优化的初值是上一帧数的优化结果bias，如果隔几帧优化一次，那么这几帧数据用的都是一样的bias即为上次优化的结果）
+        //在初始化时，在求解bgs的函数solveGyroscopeBias中求出bgs后，对滑窗中所有linearized_bg赋值了初值，初始化中这样便于之后需要优化求evaluate时求误差量用
+        Eigen::Vector3d dba = Bai - linearized_ba;//误差量的求解（k帧优化后的bias与优化前的bias之差），与上一帧的变化量，第一个滑窗时，linearized_ba对应于滑窗中每一帧均为0,但最终也会优化出bai(符合初值为0的说法)。第一个关键帧 对应的linearized_ba是0，而且Bai也是0;
         Eigen::Vector3d dbg = Bgi - linearized_bg;
 
         Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);

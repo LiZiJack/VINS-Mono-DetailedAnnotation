@@ -272,7 +272,7 @@ void process()
         lk.unlock();
 
         m_estimator.lock();
-        for (auto &measurement : measurements)
+        for (auto &measurement : measurements) //上面的getMeasurements得到了一个相邻帧image及其对于的imu预积分区间数据
         {
             //对应这段的img data
             auto img_msg = measurement.second;

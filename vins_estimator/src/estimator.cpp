@@ -856,8 +856,7 @@ void Estimator::optimization()
     vector2double();
 
     //添加边缘化残差
-    if (last_marginalization_info)
-    {
+    if (last_marginalization_info) {
         // construct new marginlization_factor
         MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
         problem.AddResidualBlock(marginalization_factor, NULL,

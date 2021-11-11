@@ -47,16 +47,15 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
     Eigen::Map<Eigen::Vector2d> residual(residuals);
 
 
-    // 残差构建
-    // 根据不同的相机模型
-#ifdef UNIT_SPHERE_ERROR 
+    // 根据不同的相机模型残差构建 
+#ifdef UNIT_SPHERE_ERROR  //鱼眼
     residual =  tangent_base * (pts_camera_j.normalized() - pts_j.normalized());
 #else//针孔相机模型
     double dep_j = pts_camera_j.z();
-    residual = (pts_camera_j / dep_j).head<2>() - pts_j.head<2>();
+    residual = (pts_camera_j / dep_j).head<2>() - pts_j.head<2>();//推测的j的深度与  观测的j的深度之差
 #endif
 
-    residual = sqrt_info * residual;
+    residual = sqrt_info * residual;//归一化平面是处以了Z的，这里通过焦距恢复现实尺度
 
     //reduce 表示残差residual对fci（pts_camera_j）的导数，同样根据不同的相机模型
     if (jacobians)

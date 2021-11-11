@@ -2,18 +2,22 @@
 
 void ResidualBlockInfo::Evaluate()
 {
+    //获取残差的个数： IMU + 视觉
     residuals.resize(cost_function->num_residuals());
-
+    //优化变量参数块的变量大小：para_Pose、para_SpeedBias、para_Ex_Pose、para_Feature、para_Td
     std::vector<int> block_sizes = cost_function->parameter_block_sizes();
+    //数组外围的大小，也就是参数块的个数
     raw_jacobians = new double *[block_sizes.size()];
     jacobians.resize(block_sizes.size());
-
+    //分配每一行的大小，残差的维数*每个参数块中参数的个数block_sizes[i]，J矩阵大小的确认！想一下
+    //比如：两个残差f1,f2;5个变量x1,x2,,,x5, 则J矩阵是2行5列呀
     for (int i = 0; i < static_cast<int>(block_sizes.size()); i++)
     {
         jacobians[i].resize(cost_function->num_residuals(), block_sizes[i]);
         raw_jacobians[i] = jacobians[i].data();
         //dim += block_sizes[i] == 7 ? 6 : block_sizes[i];
     }
+    //利用各自残差的Evaluate函数计算残差和雅克比矩阵。
     cost_function->Evaluate(parameter_blocks.data(), residuals.data(), raw_jacobians);
 
     //std::vector<int> tmp_idx(block_sizes.size());
@@ -33,12 +37,10 @@ void ResidualBlockInfo::Evaluate()
     //Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(tmp);
     //std::cout << saes.eigenvalues() << std::endl;
     //ROS_ASSERT(saes.eigenvalues().minCoeff() >= -1e-6);
-
+     //好像 这个是视觉里面有的Huber核函数；有鲁棒核函数的残差部分，重写雅克比与残差
     if (loss_function)
     {
         double residual_scaling_, alpha_sq_norm_;
-
-        double sq_norm, rho[3];
 
         sq_norm = residuals.squaredNorm();
         loss_function->Evaluate(sq_norm, rho);
@@ -145,12 +147,15 @@ void* ThreadsConstructA(void* threadsstruct)
     ThreadsStruct* p = ((ThreadsStruct*)threadsstruct);
     for (auto it : p->sub_factors)
     {
+        //遍历该factor中的所有参数块，五个参数块，分别计算
         for (int i = 0; i < static_cast<int>(it->parameter_blocks.size()); i++)
         {
             int idx_i = p->parameter_block_idx[reinterpret_cast<long>(it->parameter_blocks[i])];
             int size_i = p->parameter_block_size[reinterpret_cast<long>(it->parameter_blocks[i])];
-            if (size_i == 7)
+            if (size_i == 7)//对于pose来说，是7维的,最后一维为0，这里取左边6
                 size_i = 6;
+            //只提取local size部分，对于pose来说，是7维的,最后一维为0，这里取左边6维
+            //P.leftCols(cols) = P(:, 1:cols)，取出从1列开始的cols列
             Eigen::MatrixXd jacobian_i = it->jacobians[i].leftCols(size_i);
             for (int j = i; j < static_cast<int>(it->parameter_blocks.size()); j++)
             {
@@ -159,24 +164,26 @@ void* ThreadsConstructA(void* threadsstruct)
                 if (size_j == 7)
                     size_j = 6;
                 Eigen::MatrixXd jacobian_j = it->jacobians[j].leftCols(size_j);
+                //对应对角区域，H*X=b, A代表H矩阵
                 if (i == j)
                     p->A.block(idx_i, idx_j, size_i, size_j) += jacobian_i.transpose() * jacobian_j;
                 else
-                {
+                {//对应非对角区域
                     p->A.block(idx_i, idx_j, size_i, size_j) += jacobian_i.transpose() * jacobian_j;
                     p->A.block(idx_j, idx_i, size_j, size_i) = p->A.block(idx_i, idx_j, size_i, size_j).transpose();
                 }
             }
+            //求取b，Hx=b，都是根据公式来写程序的
             p->b.segment(idx_i, size_i) += jacobian_i.transpose() * it->residuals;
         }
     }
     return threadsstruct;
 }
 
-//多线程构造先验项舒尔补AX=b的结构，计算Jacobian和残差
+//多线程构造先验项舒尔补AX=b的结构，计算线性化点处的Jacobian和残差
 void MarginalizationInfo::marginalize()
 {
-    int pos = 0;
+    int pos = 0;//pos表示所有的被marg掉的参数块以及它们的相连接参数块的localsize之和
     for (auto &it : parameter_block_idx)
     {
         it.second = pos;
@@ -189,6 +196,7 @@ void MarginalizationInfo::marginalize()
     {
         if (parameter_block_idx.find(it.first) == parameter_block_idx.end())
         {
+            //将被marg掉参数的相连接参数块添加到parameter_block_idx中
             parameter_block_idx[it.first] = pos;
             pos += localSize(it.second);
         }
@@ -242,6 +250,7 @@ void MarginalizationInfo::marginalize()
         i++;
         i = i % NUM_THREADS;
     }
+    //这段代码开启多线程来构建信息矩阵A和残差b；将所有的先验约束因子平均分配到NUM_THREADS个线程中，每个线程分别构建一个A和b
     for (int i = 0; i < NUM_THREADS; i++)
     {
         TicToc zero_matrix;
@@ -267,6 +276,7 @@ void MarginalizationInfo::marginalize()
 
 
     //TODO
+    /*代码这里求Amm的逆矩阵时，为了保证数值稳定性，做了Amm=1/2*(Amm+Amm^T)的运算，Amm本身是一个对称矩阵，所以  等式成立。接着对Amm进行了特征值分解,再求逆，更加的快速*/
     Eigen::MatrixXd Amm = 0.5 * (A.block(0, 0, m, m) + A.block(0, 0, m, m).transpose());
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes(Amm);
 
@@ -275,24 +285,33 @@ void MarginalizationInfo::marginalize()
     Eigen::MatrixXd Amm_inv = saes.eigenvectors() * Eigen::VectorXd((saes.eigenvalues().array() > eps).select(saes.eigenvalues().array().inverse(), 0)).asDiagonal() * saes.eigenvectors().transpose();
     //printf("error1: %f\n", (Amm * Amm_inv - Eigen::MatrixXd::Identity(m, m)).sum());
 
+    // 设x_{m}为要被marg掉的状态量，x_{r}是与x_{m}相关的状态量，所以在最后我们要保存的是x_{r}的信息
+    //
+    //      |      |    |          |   |
+    //      |  Amm | Amr|  m       |bmm|        |x_{m}|
+    //  A = |______|____|      b = |__ |       A|x_{r}| = b
+    //      |  Arm | Arr|  n       |brr|
+    //      |      |    |          |   |
+
     //舒尔补
     Eigen::VectorXd bmm = b.segment(0, m);
     Eigen::MatrixXd Amr = A.block(0, m, m, n);
     Eigen::MatrixXd Arm = A.block(m, 0, n, m);
     Eigen::MatrixXd Arr = A.block(m, m, n, n);
     Eigen::VectorXd brr = b.segment(m, n);
-    A = Arr - Arm * Amm_inv * Amr;
-    b = brr - Arm * Amm_inv * bmm;
+    //这里的A和b是marg过的A和b
+    A = Arr - Arm * Amm_inv * Amr;//对应推导过程中的式七
+    b = brr - Arm * Amm_inv * bmm;//对应推导过程中的式七
 
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(A);
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> saes2(A);//求更新后 A特征值
     Eigen::VectorXd S = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array(), 0));
     Eigen::VectorXd S_inv = Eigen::VectorXd((saes2.eigenvalues().array() > eps).select(saes2.eigenvalues().array().inverse(), 0));
 
-    Eigen::VectorXd S_sqrt = S.cwiseSqrt();
+    Eigen::VectorXd S_sqrt = S.cwiseSqrt();//矩阵开方得到雅克比 J. 意思是sqrt(S)
     Eigen::VectorXd S_inv_sqrt = S_inv.cwiseSqrt();
 
-    linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();
-    linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;
+    linearized_jacobians = S_sqrt.asDiagonal() * saes2.eigenvectors().transpose();//线性化x0处的Jacobian  //对Amm进行了特征值分解,再求逆，更加的快速    //x.asDiagonal()意思是 diag(x)对角阵
+    linearized_residuals = S_inv_sqrt.asDiagonal() * saes2.eigenvectors().transpose() * b;//线性化x0处的e
     //std::cout << A << std::endl
     //          << std::endl;
     //std::cout << linearized_jacobians << std::endl;
@@ -366,9 +385,7 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
         }
     }
     Eigen::Map<Eigen::VectorXd>(residuals, n) = marginalization_info->linearized_residuals + marginalization_info->linearized_jacobians * dx;
-    if (jacobians)
-    {
-
+    if (jacobians) {
         for (int i = 0; i < static_cast<int>(marginalization_info->keep_block_size.size()); i++)
         {
             if (jacobians[i])

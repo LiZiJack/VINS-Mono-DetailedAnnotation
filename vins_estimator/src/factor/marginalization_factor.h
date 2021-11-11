@@ -51,7 +51,7 @@ class MarginalizationInfo
     int globalSize(int size) const;
     void addResidualBlockInfo(ResidualBlockInfo *residual_block_info);
     void preMarginalize();
-    void marginalize();
+    void marginalize();//pos 为所有变量的维度，m为要marg掉的变量,n为保留的变量
     std::vector<double *> getParameterBlocks(std::unordered_map<long, double *> &addr_shift);
 
     std::vector<ResidualBlockInfo *> factors;//所有观测项

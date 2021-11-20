@@ -58,7 +58,7 @@ class MarginalizationInfo
     int m, n;//m为要边缘化的变量个数，n为要保留下来的变量个数
     std::unordered_map<long, int> parameter_block_size; //<优化变量内存地址,localSize>
     int sum_block_size;
-    std::unordered_map<long, int> parameter_block_idx; //<待边缘化的优化变量内存地址,在parameter_block_size中的id>
+    std::unordered_map<long, int> parameter_block_idx; //<<参数块地址，参数块排序好后的索引>
     std::unordered_map<long, double *> parameter_block_data;//<优化变量内存地址,数据>
 
     std::vector<int> keep_block_size; //global size

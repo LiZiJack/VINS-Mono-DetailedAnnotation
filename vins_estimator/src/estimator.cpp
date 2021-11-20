@@ -669,14 +669,14 @@ void Estimator::double2vector()
 
     // 优化后的位姿
     Vector3d origin_R00 = Utility::R2ypr(Quaterniond(para_Pose[0][6],
-                                                      para_Pose[0][3],
-                                                      para_Pose[0][4],
-                                                      para_Pose[0][5]).toRotationMatrix());
-    // 求得优化前后的姿态差
+                                                     para_Pose[0][3],
+                                                     para_Pose[0][4],
+                                                     para_Pose[0][5]).toRotationMatrix());
+    //求得优化前后的姿态差  Rotation
     double y_diff = origin_R0.x() - origin_R00.x();
     //TODO
     Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
-    if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0)
+    if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0)//上面ypr2R过程可能会出现90度的万象锁问题这里判断下
     {
         ROS_DEBUG("euler singular point!");
         rot_diff = Rs[0] * Quaterniond(para_Pose[0][6],
@@ -692,11 +692,11 @@ void Estimator::double2vector()
         
         Ps[i] = rot_diff * Vector3d(para_Pose[i][0] - para_Pose[0][0],
                                 para_Pose[i][1] - para_Pose[0][1],
-                                para_Pose[i][2] - para_Pose[0][2]) + origin_P0;
+                                para_Pose[i][2] - para_Pose[0][2]) + origin_P0;//先转到第一个关键帧坐标系下，然后再加第一个关键帧的偏移
 
         Vs[i] = rot_diff * Vector3d(para_SpeedBias[i][0],
                                     para_SpeedBias[i][1],
-                                    para_SpeedBias[i][2]);
+                                    para_SpeedBias[i][2]);//速度的大小投影到矫正的方向上
 
         Bas[i] = Vector3d(para_SpeedBias[i][3],
                           para_SpeedBias[i][4],
@@ -964,7 +964,7 @@ void Estimator::optimization()
     options.linear_solver_type = ceres::DENSE_SCHUR;
     //options.num_threads = 2;
     options.trust_region_strategy_type = ceres::DOGLEG;
-    options.max_num_iterations = NUM_ITERATIONS;
+    options.max_num_iterations = NUM_ITERATIONS;//ceres迭代优化次数
     //options.use_explicit_schur_complement = true;
     //options.minimizer_progress_to_stdout = true;
     //options.use_nonmonotonic_steps = true;
@@ -1083,8 +1083,8 @@ void Estimator::optimization()
 
         //6.调整参数块在下一次窗口中对应的位置（往前移一格），注意这里是指针，后面slideWindow中会赋新值，这里只是提前占座
         std::unordered_map<long, double *> addr_shift;
-        for (int i = 1; i <= WINDOW_SIZE; i++)
-        {
+        for (int i = 1; i <= WINDOW_SIZE; i++)//从1开始，因为第一帧的状态不要了(丢弃，后面只用它的边缘化先验信息)
+        {//这一步的操作指的是第i的位置存放的的是i-1的内容，这就意味着窗口向前移动了一格
             addr_shift[reinterpret_cast<long>(para_Pose[i])] = para_Pose[i - 1];
             addr_shift[reinterpret_cast<long>(para_SpeedBias[i])] = para_SpeedBias[i - 1];
         }
